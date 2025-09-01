@@ -362,6 +362,13 @@ func (k *kustomize) Build(opts *v1alpha1.ApplicationSourceKustomize, kustomizeOp
 						log.Debugf("%s component directory does not exist", resolvedPath)
 						continue
 					}
+					
+					// Check if the directory contains a valid Kustomize component
+					if !isValidKustomizeComponent(root, resolvedPath) {
+						log.Debugf("%s component directory exists but does not contain a valid kustomization file", resolvedPath)
+						continue
+					}
+					
 					foundComponents = append(foundComponents, c)
 				}
 			}
@@ -537,4 +544,25 @@ func getImages(object map[string]any) []Image {
 		}
 	}
 	return images
+}
+
+// isValidKustomizeComponent checks if a directory contains a valid Kustomize component
+// by looking for kustomization.yaml, kustomization.yml, or Kustomization files
+func isValidKustomizeComponent(root *os.Root, componentPath string) bool {
+	// Check for kustomization.yaml
+	if _, err := root.Stat(filepath.Join(componentPath, "kustomization.yaml")); err == nil {
+		return true
+	}
+	
+	// Check for kustomization.yml
+	if _, err := root.Stat(filepath.Join(componentPath, "kustomization.yml")); err == nil {
+		return true
+	}
+	
+	// Check for Kustomization (capital K)
+	if _, err := root.Stat(filepath.Join(componentPath, "Kustomization")); err == nil {
+		return true
+	}
+	
+	return false
 }

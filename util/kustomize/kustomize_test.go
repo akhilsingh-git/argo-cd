@@ -635,6 +635,38 @@ func TestKustomizeBuildComponentsNoFoundComponents(t *testing.T) {
 	}
 }
 
+func TestKustomizeBuildComponentsInvalidComponent(t *testing.T) {
+	appPath, err := testDataDir(t, kustomization6)
+	require.NoError(t, err)
+	kustomize := NewKustomizeApp(appPath, appPath, git.NopCreds{}, "", "", "", "")
+
+	// Create a directory that exists but doesn't contain a kustomization.yaml file
+	invalidComponentDir := filepath.Join(appPath, "invalid-component")
+	err = os.MkdirAll(invalidComponentDir, 0755)
+	require.NoError(t, err)
+	
+	// Create a file in the directory to make it non-empty
+	err = os.WriteFile(filepath.Join(invalidComponentDir, "some-file.txt"), []byte("test"), 0644)
+	require.NoError(t, err)
+
+	// Test with a component that exists as a directory but doesn't contain kustomization.yaml
+	// and IgnoreMissingComponents = true
+	kustomizeSource := v1alpha1.ApplicationSourceKustomize{
+		Components:              []string{"./invalid-component"},
+		IgnoreMissingComponents: true,
+	}
+	_, _, commands, err := kustomize.Build(&kustomizeSource, nil, nil, nil)
+	require.NoError(t, err)
+
+	// Verify that no "edit add component" command was executed for the invalid component
+	for _, cmd := range commands {
+		assert.NotContains(t, cmd, "edit add component", "kustomize edit add component should not be invoked for invalid components")
+	}
+
+	// Clean up
+	os.RemoveAll(invalidComponentDir)
+}
+
 func Test_getImageParameters_sorted(t *testing.T) {
 	apps := []*unstructured.Unstructured{
 		{
