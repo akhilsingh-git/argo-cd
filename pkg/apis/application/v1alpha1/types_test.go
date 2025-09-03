@@ -949,12 +949,103 @@ func TestExplicitType(t *testing.T) {
 }
 
 func TestExplicitTypeWithDirectory(t *testing.T) {
+	// Test invalid combination: Kustomize + Directory
 	src := ApplicationSource{
-		Helm:      &ApplicationSourceHelm{},
+		Kustomize: &ApplicationSourceKustomize{NamePrefix: "foo"},
 		Directory: &ApplicationSourceDirectory{},
 	}
 	_, err := src.ExplicitType()
-	require.Error(t, err, "cannot add directory with any other types")
+	require.Error(t, err, "cannot add kustomize with directory")
+}
+
+func TestExplicitTypeWithValidCombinations(t *testing.T) {
+	// Test Directory + Plugin combination (valid)
+	src := ApplicationSource{
+		Directory: &ApplicationSourceDirectory{Recurse: true},
+		Plugin:    &ApplicationSourcePlugin{Name: "helmwave-plugin"},
+	}
+	explicitType, err := src.ExplicitType()
+	require.NoError(t, err)
+	assert.Equal(t, ApplicationSourceTypeDirectory, *explicitType)
+
+	// Test Plugin + Directory combination (valid, order doesn't matter)
+	src = ApplicationSource{
+		Plugin:    &ApplicationSourcePlugin{Name: "helmwave-plugin"},
+		Directory: &ApplicationSourceDirectory{Recurse: true},
+	}
+	explicitType, err = src.ExplicitType()
+	require.NoError(t, err)
+	assert.Equal(t, ApplicationSourceTypeDirectory, *explicitType)
+
+	// Test Directory + Helm combination (valid)
+	src = ApplicationSource{
+		Directory: &ApplicationSourceDirectory{Recurse: true},
+		Helm:      &ApplicationSourceHelm{ValueFiles: []string{"values.yaml"}},
+	}
+	explicitType, err = src.ExplicitType()
+	require.NoError(t, err)
+	assert.Equal(t, ApplicationSourceTypeDirectory, *explicitType)
+
+	// Test Helm + Directory combination (valid, order doesn't matter)
+	src = ApplicationSource{
+		Helm:      &ApplicationSourceHelm{ValueFiles: []string{"values.yaml"}},
+		Directory: &ApplicationSourceDirectory{Recurse: true},
+	}
+	explicitType, err = src.ExplicitType()
+	require.NoError(t, err)
+	assert.Equal(t, ApplicationSourceTypeDirectory, *explicitType)
+}
+
+func TestHasValidSourceTypeCombination(t *testing.T) {
+	// Test single source types (all valid)
+	src := ApplicationSource{
+		Directory: &ApplicationSourceDirectory{Recurse: true},
+	}
+	assert.True(t, src.HasValidSourceTypeCombination())
+
+	src = ApplicationSource{
+		Plugin: &ApplicationSourcePlugin{Name: "test-plugin"},
+	}
+	assert.True(t, src.HasValidSourceTypeCombination())
+
+	src = ApplicationSource{
+		Helm: &ApplicationSourceHelm{ValueFiles: []string{"values.yaml"}},
+	}
+	assert.True(t, src.HasValidSourceTypeCombination())
+
+	// Test valid combinations
+	src = ApplicationSource{
+		Directory: &ApplicationSourceDirectory{Recurse: true},
+		Plugin:    &ApplicationSourcePlugin{Name: "helmwave-plugin"},
+	}
+	assert.True(t, src.HasValidSourceTypeCombination())
+
+	src = ApplicationSource{
+		Directory: &ApplicationSourceDirectory{Recurse: true},
+		Helm:      &ApplicationSourceHelm{ValueFiles: []string{"values.yaml"}},
+	}
+	assert.True(t, src.HasValidSourceTypeCombination())
+
+	// Test invalid combinations
+	src = ApplicationSource{
+		Kustomize: &ApplicationSourceKustomize{NamePrefix: "foo"},
+		Helm:      &ApplicationSourceHelm{ValueFiles: []string{"values.yaml"}},
+	}
+	assert.False(t, src.HasValidSourceTypeCombination())
+
+	src = ApplicationSource{
+		Kustomize: &ApplicationSourceKustomize{NamePrefix: "foo"},
+		Plugin:    &ApplicationSourcePlugin{Name: "test-plugin"},
+	}
+	assert.False(t, src.HasValidSourceTypeCombination())
+
+	// Test more than 2 source types (invalid)
+	src = ApplicationSource{
+		Directory: &ApplicationSourceDirectory{Recurse: true},
+		Plugin:    &ApplicationSourcePlugin{Name: "helmwave-plugin"},
+		Helm:      &ApplicationSourceHelm{ValueFiles: []string{"values.yaml"}},
+	}
+	assert.False(t, src.HasValidSourceTypeCombination())
 }
 
 func TestAppSourceEquality(t *testing.T) {

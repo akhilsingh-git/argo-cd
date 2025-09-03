@@ -3433,6 +3433,44 @@ func (source *ApplicationSource) Equals(other *ApplicationSource) bool {
 	return reflect.DeepEqual(sourceCopy, otherCopy)
 }
 
+// HasValidSourceTypeCombination checks if the source has a valid combination of source types.
+// Some combinations like Directory + Plugin or Directory + Helm are valid and make sense together.
+func (source *ApplicationSource) HasValidSourceTypeCombination() bool {
+	var appTypes []ApplicationSourceType
+	if source.Kustomize != nil {
+		appTypes = append(appTypes, ApplicationSourceTypeKustomize)
+	}
+	if source.Helm != nil {
+		appTypes = append(appTypes, ApplicationSourceTypeHelm)
+	}
+	if source.Directory != nil {
+		appTypes = append(appTypes, ApplicationSourceTypeDirectory)
+	}
+	if source.Plugin != nil {
+		appTypes = append(appTypes, ApplicationSourceTypePlugin)
+	}
+
+	if len(appTypes) <= 1 {
+		return true
+	}
+
+	// Check for valid combinations
+	if len(appTypes) == 2 {
+		// Allow Directory + Plugin combination (for scanning directories and processing with plugins)
+		if (appTypes[0] == ApplicationSourceTypeDirectory && appTypes[1] == ApplicationSourceTypePlugin) ||
+			(appTypes[0] == ApplicationSourceTypePlugin && appTypes[1] == ApplicationSourceTypeDirectory) {
+			return true
+		}
+		// Allow Directory + Helm combination (for scanning directories containing Helm charts)
+		if (appTypes[0] == ApplicationSourceTypeDirectory && appTypes[1] == ApplicationSourceTypeHelm) ||
+			(appTypes[0] == ApplicationSourceTypeHelm && appTypes[1] == ApplicationSourceTypeDirectory) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // ExplicitType returns the type (e.g. Helm, Kustomize, etc) of the application. If either none or multiple types are defined, returns an error.
 func (source *ApplicationSource) ExplicitType() (*ApplicationSourceType, error) {
 	var appTypes []ApplicationSourceType
@@ -3452,11 +3490,30 @@ func (source *ApplicationSource) ExplicitType() (*ApplicationSourceType, error) 
 		return nil, nil
 	}
 	if len(appTypes) > 1 {
-		typeNames := make([]string, len(appTypes))
-		for i := range appTypes {
-			typeNames[i] = string(appTypes[i])
+		// Check if this is a valid combination
+		if !source.HasValidSourceTypeCombination() {
+			typeNames := make([]string, len(appTypes))
+			for i := range appTypes {
+				typeNames[i] = string(appTypes[i])
+			}
+			return nil, fmt.Errorf("multiple application sources defined: %s", strings.Join(typeNames, ","))
 		}
-		return nil, fmt.Errorf("multiple application sources defined: %s", strings.Join(typeNames, ","))
+
+		// For valid combinations, return the primary type based on the use case
+		if len(appTypes) == 2 {
+			// For Directory + Plugin, Directory is the primary type for scanning
+			if (appTypes[0] == ApplicationSourceTypeDirectory && appTypes[1] == ApplicationSourceTypePlugin) ||
+				(appTypes[0] == ApplicationSourceTypePlugin && appTypes[1] == ApplicationSourceTypeDirectory) {
+				appType := ApplicationSourceTypeDirectory
+				return &appType, nil
+			}
+			// For Directory + Helm, Directory is the primary type for scanning
+			if (appTypes[0] == ApplicationSourceTypeDirectory && appTypes[1] == ApplicationSourceTypeHelm) ||
+				(appTypes[0] == ApplicationSourceTypeHelm && appTypes[1] == ApplicationSourceTypeDirectory) {
+				appType := ApplicationSourceTypeDirectory
+				return &appType, nil
+			}
+		}
 	}
 	appType := appTypes[0]
 	return &appType, nil
