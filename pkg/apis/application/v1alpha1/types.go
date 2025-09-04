@@ -3507,10 +3507,11 @@ func (source *ApplicationSource) ExplicitType() (*ApplicationSourceType, error) 
 				appType := ApplicationSourceTypeDirectory
 				return &appType, nil
 			}
-			// For Directory + Helm, Directory is the primary type for scanning
+			// For Directory + Helm, Helm is the primary type for processing
+			// Directory specifies the location, but Helm specifies the processing method
 			if (appTypes[0] == ApplicationSourceTypeDirectory && appTypes[1] == ApplicationSourceTypeHelm) ||
 				(appTypes[0] == ApplicationSourceTypeHelm && appTypes[1] == ApplicationSourceTypeDirectory) {
-				appType := ApplicationSourceTypeDirectory
+				appType := ApplicationSourceTypeHelm
 				return &appType, nil
 			}
 		}

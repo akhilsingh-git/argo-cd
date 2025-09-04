@@ -984,7 +984,7 @@ func TestExplicitTypeWithValidCombinations(t *testing.T) {
 	}
 	explicitType, err = src.ExplicitType()
 	require.NoError(t, err)
-	assert.Equal(t, ApplicationSourceTypeDirectory, *explicitType)
+	assert.Equal(t, ApplicationSourceTypeHelm, *explicitType)
 
 	// Test Helm + Directory combination (valid, order doesn't matter)
 	src = ApplicationSource{
@@ -993,7 +993,45 @@ func TestExplicitTypeWithValidCombinations(t *testing.T) {
 	}
 	explicitType, err = src.ExplicitType()
 	require.NoError(t, err)
-	assert.Equal(t, ApplicationSourceTypeDirectory, *explicitType)
+	assert.Equal(t, ApplicationSourceTypeHelm, *explicitType)
+}
+
+func TestExplicitTypeDirectoryHelmCombination(t *testing.T) {
+	// This test verifies that Directory + Helm combinations correctly return Helm type
+	// to ensure Helm templating is not bypassed when both are specified
+	
+	// Test case 1: Directory + Helm (Helm should be primary)
+	src := ApplicationSource{
+		Directory: &ApplicationSourceDirectory{Recurse: true},
+		Helm:      &ApplicationSourceHelm{ValueFiles: []string{"values.yaml"}},
+	}
+	explicitType, err := src.ExplicitType()
+	require.NoError(t, err)
+	assert.Equal(t, ApplicationSourceTypeHelm, *explicitType, "Directory + Helm should return Helm type to ensure templating is applied")
+	
+	// Test case 2: Helm + Directory (order shouldn't matter)
+	src = ApplicationSource{
+		Helm:      &ApplicationSourceHelm{ValueFiles: []string{"values.yaml"}},
+		Directory: &ApplicationSourceDirectory{Recurse: true},
+	}
+	explicitType, err = src.ExplicitType()
+	require.NoError(t, err)
+	assert.Equal(t, ApplicationSourceTypeHelm, *explicitType, "Helm + Directory should return Helm type regardless of order")
+	
+	// Test case 3: Verify Helm configuration is preserved
+	src = ApplicationSource{
+		Directory: &ApplicationSourceDirectory{Recurse: true},
+		Helm: &ApplicationSourceHelm{
+			ValueFiles: []string{"values.yaml", "values-prod.yaml"},
+			Parameters: []HelmParameter{{Name: "image.tag", Value: "v1.0.0"}},
+		},
+	}
+	explicitType, err = src.ExplicitType()
+	require.NoError(t, err)
+	assert.Equal(t, ApplicationSourceTypeHelm, *explicitType)
+	assert.NotNil(t, src.Helm, "Helm configuration should be preserved")
+	assert.Len(t, src.Helm.ValueFiles, 2, "Helm value files should be preserved")
+	assert.Len(t, src.Helm.Parameters, 1, "Helm parameters should be preserved")
 }
 
 func TestHasValidSourceTypeCombination(t *testing.T) {
