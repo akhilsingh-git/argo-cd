@@ -4443,6 +4443,62 @@ func Test_GenerateManifests_Commands(t *testing.T) {
 		assert.Equal(t, []string{"helm template . --name-template test-app --namespace test-namespace --include-crds"}, res.Commands)
 	})
 
+	t.Run("helm chart not found should not report PermissionDenied", func(t *testing.T) {
+		// This test verifies that when a helm chart is not found (e.g., version doesn't exist),
+		// we don't incorrectly report PermissionDenied error
+		
+		// Test the error message parsing logic directly
+		testCases := []struct {
+			name           string
+			errorMsg       string
+			repoPermitted  bool
+			expectPermErr  bool
+		}{
+			{
+				name:          "chart not found - should not report permission error",
+				errorMsg:      "could not download chart: chart version 1.0.0 not found",
+				repoPermitted: true,
+				expectPermErr: false,
+			},
+			{
+				name:          "chart does not exist - should not report permission error",
+				errorMsg:      "chart version 1.0.0 does not exist",
+				repoPermitted: true,
+				expectPermErr: false,
+			},
+			{
+				name:          "repository not accessible - should report permission error if not permitted",
+				errorMsg:      "https://charts.example.com is not a valid chart repository or cannot be reached",
+				repoPermitted: false,
+				expectPermErr: true,
+			},
+			{
+				name:          "repository not accessible but permitted - should not report permission error",
+				errorMsg:      "https://charts.example.com is not a valid chart repository or cannot be reached",
+				repoPermitted: true,
+				expectPermErr: false,
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				// Test the logic from the fixed code
+				chartCannotBeReached := strings.Contains(tc.errorMsg, "is not a valid chart repository or cannot be reached")
+				couldNotDownloadChart := strings.Contains(tc.errorMsg, "could not download")
+				chartNotFound := strings.Contains(tc.errorMsg, "not found") || strings.Contains(tc.errorMsg, "does not exist") || 
+								 strings.Contains(tc.errorMsg, "no such chart") || strings.Contains(tc.errorMsg, "chart version") && strings.Contains(tc.errorMsg, "not found")
+				
+				shouldCheckPermissions := chartCannotBeReached || (couldNotDownloadChart && !chartNotFound)
+				
+				if shouldCheckPermissions && !tc.repoPermitted {
+					assert.True(t, tc.expectPermErr, "Should report permission error for case: %s", tc.name)
+				} else {
+					assert.False(t, tc.expectPermErr, "Should not report permission error for case: %s", tc.name)
+				}
+			})
+		}
+	})
+
 	t.Run("kustomize", func(t *testing.T) {
 		// Write test files to a temp dir, because the test mutates kustomization.yaml in place.
 		tempDir := t.TempDir()

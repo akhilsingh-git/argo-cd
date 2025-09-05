@@ -1312,14 +1312,22 @@ func helmTemplate(appPath string, repoRoot string, env *v1alpha1.Env, q *apiclie
 			var reposNotPermitted []string
 			// We do a sanity check here to give a nicer error message in case any of the Helm repositories are not permitted by
 			// the AppProject which the application is a part of
-			for _, repo := range helmRepos {
-				msg := err.Error()
-
-				chartCannotBeReached := strings.Contains(msg, "is not a valid chart repository or cannot be reached")
-				couldNotDownloadChart := strings.Contains(msg, "could not download")
-
-				if (chartCannotBeReached || couldNotDownloadChart) && !isSourcePermitted(repo.Repo, q.ProjectSourceRepos) {
-					reposNotPermitted = append(reposNotPermitted, repo.Repo)
+			msg := err.Error()
+			
+			// Check for specific error patterns that indicate permission issues vs chart not found
+			chartCannotBeReached := strings.Contains(msg, "is not a valid chart repository or cannot be reached")
+			couldNotDownloadChart := strings.Contains(msg, "could not download")
+			chartNotFound := strings.Contains(msg, "not found") || strings.Contains(msg, "does not exist") || 
+							 strings.Contains(msg, "no such chart") || strings.Contains(msg, "chart version") && strings.Contains(msg, "not found")
+			
+			// Only report PermissionDenied if:
+			// 1. The error suggests a repository access issue (not chart not found)
+			// 2. AND the repository is actually not permitted
+			if (chartCannotBeReached || (couldNotDownloadChart && !chartNotFound)) {
+				for _, repo := range helmRepos {
+					if !isSourcePermitted(repo.Repo, q.ProjectSourceRepos) {
+						reposNotPermitted = append(reposNotPermitted, repo.Repo)
+					}
 				}
 			}
 
