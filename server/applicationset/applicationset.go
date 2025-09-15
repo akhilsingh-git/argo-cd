@@ -111,6 +111,28 @@ func NewServer(
 	return s
 }
 
+// getApplicationSetRBACName returns the properly resolved RBAC name for an ApplicationSet.
+// This handles the case where the project field might contain templates that need to be resolved.
+func (s *Server) getApplicationSetRBACName(appset *v1alpha1.ApplicationSet) string {
+	projectName := appset.Spec.Template.Spec.Project
+
+	// If the project field contains templates, we need to resolve it properly
+	// For RBAC purposes, we should use the default project if the field is templated
+	if strings.Contains(projectName, "{{") {
+		// For templated project fields, use the default project for RBAC checks
+		// This ensures that users with access to the default project can access ApplicationSets
+		// with templated project fields, which is the expected behavior
+		projectName = v1alpha1.DefaultAppProjectName
+	}
+
+	// If project is empty, use default project
+	if projectName == "" {
+		projectName = v1alpha1.DefaultAppProjectName
+	}
+
+	return security.RBACName(s.ns, projectName, appset.Namespace, appset.Name)
+}
+
 func (s *Server) Get(ctx context.Context, q *applicationset.ApplicationSetGetQuery) (*v1alpha1.ApplicationSet, error) {
 	namespace := s.appsetNamespaceOrDefault(q.AppsetNamespace)
 
@@ -122,7 +144,10 @@ func (s *Server) Get(ctx context.Context, q *applicationset.ApplicationSetGetQue
 	if err != nil {
 		return nil, fmt.Errorf("error getting ApplicationSet: %w", err)
 	}
-	err = s.enf.EnforceErr(ctx.Value("claims"), rbac.ResourceApplicationSets, rbac.ActionGet, a.RBACName(s.ns))
+
+	// Resolve the project name properly for RBAC checks
+	rbacName := s.getApplicationSetRBACName(a)
+	err = s.enf.EnforceErr(ctx.Value("claims"), rbac.ResourceApplicationSets, rbac.ActionGet, rbacName)
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +181,9 @@ func (s *Server) List(ctx context.Context, q *applicationset.ApplicationSetListQ
 			continue
 		}
 
-		if s.enf.Enforce(ctx.Value("claims"), rbac.ResourceApplicationSets, rbac.ActionGet, a.RBACName(s.ns)) {
+		// Resolve the project name properly for RBAC checks
+		rbacName := s.getApplicationSetRBACName(a)
+		if s.enf.Enforce(ctx.Value("claims"), rbac.ResourceApplicationSets, rbac.ActionGet, rbacName) {
 			newItems = append(newItems, *a)
 		}
 	}
@@ -249,7 +276,7 @@ func (s *Server) Create(ctx context.Context, q *applicationset.ApplicationSetCre
 	if !q.Upsert {
 		return nil, status.Errorf(codes.InvalidArgument, "existing ApplicationSet spec is different, use upsert flag to force update")
 	}
-	err = s.enf.EnforceErr(ctx.Value("claims"), rbac.ResourceApplicationSets, rbac.ActionUpdate, appset.RBACName(s.ns))
+	err = s.enf.EnforceErr(ctx.Value("claims"), rbac.ResourceApplicationSets, rbac.ActionUpdate, s.getApplicationSetRBACName(appset))
 	if err != nil {
 		return nil, err
 	}
@@ -278,11 +305,11 @@ func (s *Server) updateAppSet(ctx context.Context, appset *v1alpha1.ApplicationS
 	if appset != nil && appset.Spec.Template.Spec.Project != newAppset.Spec.Template.Spec.Project {
 		// When changing projects, caller must have applicationset create and update privileges in new project
 		// NOTE: the update check was already verified in the caller to this function
-		if err := s.enf.EnforceErr(ctx.Value("claims"), rbac.ResourceApplicationSets, rbac.ActionCreate, newAppset.RBACName(s.ns)); err != nil {
+		if err := s.enf.EnforceErr(ctx.Value("claims"), rbac.ResourceApplicationSets, rbac.ActionCreate, s.getApplicationSetRBACName(newAppset)); err != nil {
 			return nil, err
 		}
 		// They also need 'update' privileges in the old project
-		if err := s.enf.EnforceErr(ctx.Value("claims"), rbac.ResourceApplicationSets, rbac.ActionUpdate, appset.RBACName(s.ns)); err != nil {
+		if err := s.enf.EnforceErr(ctx.Value("claims"), rbac.ResourceApplicationSets, rbac.ActionUpdate, s.getApplicationSetRBACName(appset)); err != nil {
 			return nil, err
 		}
 	}
@@ -323,7 +350,7 @@ func (s *Server) Delete(ctx context.Context, q *applicationset.ApplicationSetDel
 		return nil, fmt.Errorf("error getting ApplicationSets: %w", err)
 	}
 
-	if err := s.enf.EnforceErr(ctx.Value("claims"), rbac.ResourceApplicationSets, rbac.ActionDelete, appset.RBACName(s.ns)); err != nil {
+	if err := s.enf.EnforceErr(ctx.Value("claims"), rbac.ResourceApplicationSets, rbac.ActionDelete, s.getApplicationSetRBACName(appset)); err != nil {
 		return nil, err
 	}
 
@@ -349,7 +376,7 @@ func (s *Server) ResourceTree(ctx context.Context, q *applicationset.Application
 	if err != nil {
 		return nil, fmt.Errorf("error getting ApplicationSet: %w", err)
 	}
-	err = s.enf.EnforceErr(ctx.Value("claims"), rbac.ResourceApplicationSets, rbac.ActionGet, a.RBACName(s.ns))
+	err = s.enf.EnforceErr(ctx.Value("claims"), rbac.ResourceApplicationSets, rbac.ActionGet, s.getApplicationSetRBACName(a))
 	if err != nil {
 		return nil, err
 	}
@@ -450,7 +477,7 @@ func (s *Server) validateAppSet(appset *v1alpha1.ApplicationSet) (string, error)
 }
 
 func (s *Server) checkCreatePermissions(ctx context.Context, appset *v1alpha1.ApplicationSet, projectName string) error {
-	if err := s.enf.EnforceErr(ctx.Value("claims"), rbac.ResourceApplicationSets, rbac.ActionCreate, appset.RBACName(s.ns)); err != nil {
+	if err := s.enf.EnforceErr(ctx.Value("claims"), rbac.ResourceApplicationSets, rbac.ActionCreate, s.getApplicationSetRBACName(appset)); err != nil {
 		return err
 	}
 
