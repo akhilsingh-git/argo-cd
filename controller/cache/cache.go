@@ -588,6 +588,28 @@ func (c *liveStateCache) getCluster(cluster *appv1.Cluster) (clustercache.Cluste
 		cacheSettings := c.cacheSettings
 		c.lock.RUnlock()
 
+		// Check if this resource should be excluded based on resource inclusion/exclusion filters
+		gvk := schema.FromAPIVersionAndKind(ref.APIVersion, ref.Kind)
+		if cacheSettings.clusterSettings.ResourcesFilter != nil && 
+		   cacheSettings.clusterSettings.ResourcesFilter.IsExcludedResource(gvk.Group, gvk.Kind, cluster.Server) {
+			// Skip processing this resource as it's excluded by resource filters
+			if log.GetLevel() >= log.DebugLevel {
+				namespace := ref.Namespace
+				if ref.Namespace == "" {
+					namespace = "(cluster-scoped)"
+				}
+				log.WithFields(log.Fields{
+					"server":      cluster.Server,
+					"namespace":   namespace,
+					"name":        ref.Name,
+					"api-version": ref.APIVersion,
+					"kind":        ref.Kind,
+					"group":       gvk.Group,
+				}).Debug("Ignoring resource update because it is excluded by resource inclusion/exclusion filters")
+			}
+			return
+		}
+
 		if cacheSettings.ignoreResourceUpdatesEnabled && oldRes != nil && newRes != nil && skipResourceUpdate(resInfo(oldRes), resInfo(newRes)) {
 			// Additional check for debug level so we don't need to evaluate the
 			// format string in case of non-debug scenarios
@@ -622,6 +644,31 @@ func (c *liveStateCache) getCluster(cluster *appv1.Cluster) (clustercache.Cluste
 
 	_ = clusterCache.OnEvent(func(_ watch.EventType, un *unstructured.Unstructured) {
 		gvk := un.GroupVersionKind()
+		
+		// Check if this resource should be excluded based on resource inclusion/exclusion filters
+		c.lock.RLock()
+		cacheSettings := c.cacheSettings
+		c.lock.RUnlock()
+		
+		if cacheSettings.clusterSettings.ResourcesFilter != nil && 
+		   cacheSettings.clusterSettings.ResourcesFilter.IsExcludedResource(gvk.Group, gvk.Kind, cluster.Server) {
+			// Skip processing this resource event as it's excluded by resource filters
+			if log.GetLevel() >= log.DebugLevel {
+				namespace := un.GetNamespace()
+				if namespace == "" {
+					namespace = "(cluster-scoped)"
+				}
+				log.WithFields(log.Fields{
+					"server":    cluster.Server,
+					"namespace": namespace,
+					"name":      un.GetName(),
+					"group":     gvk.Group,
+					"kind":      gvk.Kind,
+				}).Debug("Ignoring resource event because it is excluded by resource inclusion/exclusion filters")
+			}
+			return
+		}
+		
 		c.metricsServer.IncClusterEventsCount(cluster.Server, gvk.Group, gvk.Kind)
 	})
 
@@ -720,7 +767,32 @@ func (c *liveStateCache) GetVersionsInfo(server *appv1.Cluster) (string, []kube.
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to get cluster info for %q: %w", server.Server, err)
 	}
-	return clusterInfo.GetServerVersion(), clusterInfo.GetAPIResources(), nil
+	
+	serverVersion := clusterInfo.GetServerVersion()
+	apiResources := clusterInfo.GetAPIResources()
+	
+	// Apply resource inclusion/exclusion filtering to the API resources
+	c.lock.RLock()
+	resourcesFilter := c.cacheSettings.clusterSettings.ResourcesFilter
+	c.lock.RUnlock()
+	
+	if resourcesFilter != nil {
+		filteredResources := make([]kube.APIResourceInfo, 0, len(apiResources))
+		for _, resource := range apiResources {
+			if !resourcesFilter.IsExcludedResource(resource.GroupKind.Group, resource.GroupKind.Kind, server.Server) {
+				filteredResources = append(filteredResources, resource)
+			} else if log.GetLevel() >= log.DebugLevel {
+				log.WithFields(log.Fields{
+					"server": server.Server,
+					"group":  resource.GroupKind.Group,
+					"kind":   resource.GroupKind.Kind,
+				}).Debug("Excluding API resource from discovery based on resource inclusion/exclusion filters")
+			}
+		}
+		return serverVersion, filteredResources, nil
+	}
+	
+	return serverVersion, apiResources, nil
 }
 
 func (c *liveStateCache) isClusterHasApps(apps []any, cluster *appv1.Cluster) bool {
